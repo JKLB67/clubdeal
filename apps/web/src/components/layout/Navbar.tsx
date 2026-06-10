@@ -23,6 +23,11 @@ export function Navbar() {
         {user ? (
           <>
             <span className="text-sm text-gray-600">{user.email}</span>
+            {user.role === 'INVESTOR' && (
+              <Link href="/account/investments" className="text-sm text-gray-600 hover:text-blue-700">
+                Mes investissements
+              </Link>
+            )}
             {user.role === 'ADMIN' && (
               <Link href="/admin" className="text-sm text-blue-600 hover:underline">
                 Back-office

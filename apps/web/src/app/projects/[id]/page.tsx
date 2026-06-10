@@ -198,9 +198,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   Se connecter pour investir
                 </Link>
               ) : kycValidated ? (
-                <button className="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-xl transition-colors">
+                <Link
+                  href={`/invest/${project.id}`}
+                  className="block w-full text-center bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-xl transition-colors"
+                >
                   Participer à la collecte
-                </button>
+                </Link>
               ) : (
                 <div className="space-y-3">
                   <button
