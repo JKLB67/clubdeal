@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// MULTI-TENANCY
+// ─────────────────────────────────────────────
+
+model Tenant {
+  id               String          @id @default(uuid())
+  slug             String          @unique
+  subdomain        String          @unique
+  name             String
+  logoUrl          String?
+  primaryColor     String          @default("#1a56db")
+  secondaryColor   String          @default("#e3a008")
+  status           TenantStatus    @default(ACTIVE)
+  subscriptionPlan String          @default("starter")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  settings          TenantSettings?
+  users             User[]
+  projects          Project[]
+  documentTemplates DocumentTemplate[]
+  investments       Investment[]
+  webhookEvents     WebhookEvent[]
+}
+
+model TenantSettings {
+  id                String         @id @default(uuid())
+  tenantId          String         @unique
+  tenant            Tenant         @relation(fields: [tenantId], references: [id])
+
+  pspProvider       PspProvider?
+  pspClientIdEnc    String?
+  pspApiKeyEnc      String?
+
+  esignProvider     EsignProvider?
+  esignApiKeyEnc    String?
+  esignAccountIdEnc String?
+
+  updatedAt         DateTime       @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// UTILISATEURS
+// ─────────────────────────────────────────────
+
+model User {
+  id           String      @id @default(uuid())
+  tenantId     String
+  tenant       Tenant      @relation(fields: [tenantId], references: [id])
+
+  email        String
+  passwordHash String
+  role         UserRole    @default(INVESTOR)
+  profileType  ProfileType @default(PHYSICAL)
+  statusKyc    KycStatus   @default(NOT_INITIATED)
+  isPep        Boolean     @default(false)
+  pspUserId    String?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  physicalProfile UserPhysicalProfile?
+  legalProfile    UserLegalProfile?
+  investments     Investment[]
+
+  @@unique([tenantId, email])
+}
+
+model UserPhysicalProfile {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id])
+
+  firstName    String
+  lastName     String
+  birthDate    DateTime?
+  birthPlace   String?
+  birthCountry String?
+  nationality  String?
+  addressLine1 String?
+  addressLine2 String?
+  postalCode   String?
+  city         String?
+  country      String?
+}
+
+model UserLegalProfile {
+  id                    String  @id @default(uuid())
+  userId                String  @unique
+  user                  User    @relation(fields: [userId], references: [id])
+
+  companyName           String
+  legalForm             String?
+  siren                 String?
+  siret                 String?
+  registeredAddress     String?
+  legalRepresentativeId String?
+
+  ubos                  Ubo[]
+}
+
+model Ubo {
+  id               String           @id @default(uuid())
+  legalProfileId   String
+  legalProfile     UserLegalProfile @relation(fields: [legalProfileId], references: [id])
+
+  firstName        String
+  lastName         String
+  birthDate        DateTime?
+  nationality      String?
+  address          String?
+  ownershipPercent Decimal          @db.Decimal(5, 2)
+}
+
+// ─────────────────────────────────────────────
+// PROJETS IMMOBILIERS
+// ─────────────────────────────────────────────
+
+model Project {
+  id                       String        @id @default(uuid())
+  tenantId                 String
+  tenant                   Tenant        @relation(fields: [tenantId], references: [id])
+
+  name                     String
+  address                  String
+  description              String?
+  collectionGoal           BigInt
+  collectedAmount          BigInt        @default(0)
+  annualYield              Decimal       @db.Decimal(5, 2)
+  durationMonths           Int
+  precommercialisationRate Decimal?      @db.Decimal(5, 2)
+  status                   ProjectStatus @default(DRAFT)
+
+  pspWalletId              String?
+  virtualIban              String?
+
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  photos      ProjectPhoto[]
+  documents   ProjectDocument[]
+  investments Investment[]
+}
+
+model ProjectPhoto {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+  url        String
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model ProjectDocument {
+  id        String              @id @default(uuid())
+  projectId String
+  project   Project             @relation(fields: [projectId], references: [id])
+  name      String
+  url       String
+  type      ProjectDocumentType @default(OTHER)
+  createdAt DateTime            @default(now())
+}
+
+// ─────────────────────────────────────────────
+// TEMPLATES DE DOCUMENTS
+// ─────────────────────────────────────────────
+
+model DocumentTemplate {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  name        String
+  description String?
+  templateUrl String
+  variables   Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  investments Investment[]
+}
+
+// ─────────────────────────────────────────────
+// INVESTISSEMENTS
+// ─────────────────────────────────────────────
+
+model Investment {
+  id        String           @id @default(uuid())
+  tenantId  String
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id])
+  templateId String?
+  template  DocumentTemplate? @relation(fields: [templateId], references: [id])
+
+  amount    BigInt
+  status    InvestmentStatus @default(PENDING_SIGNATURE)
+
+  signedDocumentUrl String?
+  esignRequestId    String?
+  esignSignedAt     DateTime?
+
+  pspTransactionId  String?
+  confirmedAt       DateTime?
+
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// WEBHOOKS
+// ─────────────────────────────────────────────
+
+model WebhookEvent {
+  id              String          @id @default(uuid())
+  tenantId        String?
+  tenant          Tenant?         @relation(fields: [tenantId], references: [id])
+  provider        WebhookProvider
+  externalEventId String          @unique
+  eventType       String
+  payload         Json
+  status          WebhookStatus   @default(RECEIVED)
+  createdAt       DateTime        @default(now())
+  processedAt     DateTime?
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  INVESTOR
+}
+
+enum ProfileType {
+  PHYSICAL
+  LEGAL
+}
+
+enum KycStatus {
+  NOT_INITIATED
+  PENDING
+  VALIDATED
+  REFUSED
+}
+
+enum PspProvider {
+  MANGOPAY
+  LEMONWAY
+}
+
+enum EsignProvider {
+  YOUSIGN
+  DOCUSIGN
+  OODRIDE
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  FUNDED
+  CLOSED
+}
+
+enum ProjectDocumentType {
+  PERMIT
+  COMPROMISE
+  OTHER
+}
+
+enum InvestmentStatus {
+  PENDING_SIGNATURE
+  PENDING_PAYMENT
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum WebhookProvider {
+  MANGOPAY
+  LEMONWAY
+  YOUSIGN
+  DOCUSIGN
+  OODRIDE
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
