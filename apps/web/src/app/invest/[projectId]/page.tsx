@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useEffect } from 'react';
+import { use, useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -9,12 +9,12 @@ import { useAuth } from '@/context/auth';
 import { api } from '@/lib/api';
 import { Project } from '@/types';
 import { formatEuros } from '@/lib/utils';
-import { CheckCircle, FileText, CreditCard, ChevronLeft, Loader2, ZoomIn } from 'lucide-react';
+import { CheckCircle, FileText, CreditCard, ChevronLeft, Loader2, ZoomIn, Clock } from 'lucide-react';
 import { PdfViewer } from '@/components/ui/PdfViewer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-type Step = 'amount' | 'sign' | 'payment' | 'confirmed';
+type Step = 'amount' | 'sign' | 'pending_cosign' | 'payment' | 'confirmed';
 
 interface Investment {
   id: string;
@@ -146,7 +146,7 @@ function StepSign({
       const updated = await api.post<Investment>(`/api/investments/${inv.id}/sign-bulletin`, {});
       const merged = { ...inv, ...updated };
       setInv(merged);
-      // Avancer vers le paiement uniquement après les 2 signatures
+      // Avancer vers l'attente de co-signature après les 2 signatures investisseur
       if ((merged as any).contratInvestorSignedAt && (merged as any).bulletinSignedAt) {
         onNext(merged);
       }
@@ -232,19 +232,80 @@ function StepSign({
 
       {contratSigned && bulletinSigned && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 text-center font-medium mb-4">
-          ✓ Les 2 documents sont signés — procédez au virement
+          ✓ Les 2 documents sont signés — en attente de co-signature
         </div>
       )}
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-800">
         <p className="font-semibold mb-0.5">Après votre signature</p>
-        <p>L'émetteur co-signera le contrat. Vous pouvez virer dès maintenant.</p>
+        <p>L'émetteur co-signera le contrat. L'IBAN de virement vous sera communiqué une fois toutes les parties ayant signé.</p>
       </div>
     </div>
   );
 }
 
-// ─── Étape 3 : Paiement ──────────────────────────────────────────────────────
+// ─── Étape 3 : Attente co-signature ──────────────────────────────────────────
+function StepPendingCosign({ investment }: { investment: Investment }) {
+  return (
+    <div className="max-w-lg mx-auto">
+      <div className="flex flex-col items-center text-center py-6 mb-6">
+        <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center mb-4">
+          <Clock className="w-8 h-8 text-purple-600" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">En attente de co-signature</h2>
+        <p className="text-gray-500 text-sm max-w-sm">
+          Vous avez signé les deux documents. L'émetteur doit maintenant co-signer le contrat d'émission.
+          Vous recevrez un email dès que toutes les parties auront signé.
+        </p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-5 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+            <CheckCircle className="w-4 h-4 text-green-600" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">Vos signatures</p>
+            <p className="text-xs text-gray-400">Contrat + bulletin signés</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <Clock className="w-4 h-4 text-purple-500" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">Co-signature émetteur</p>
+            <p className="text-xs text-gray-400">En attente — délai habituel 24–48h</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 opacity-40">
+          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <CreditCard className="w-4 h-4 text-gray-400" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">Virement bancaire</p>
+            <p className="text-xs text-gray-400">L'IBAN sera communiqué après toutes les signatures</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-sm text-purple-800 mb-6">
+        <p className="font-semibold mb-1">Montant souscrit</p>
+        <p className="text-2xl font-bold text-purple-700">{formatEuros(investment.amount)}</p>
+        <p className="text-xs text-purple-600 mt-1">Réf. : {investment.id}</p>
+      </div>
+
+      <Link
+        href="/account/investments"
+        className="block w-full text-center border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium py-3 rounded-xl transition-colors text-sm"
+      >
+        Suivre mes investissements →
+      </Link>
+    </div>
+  );
+}
+
+// ─── Étape 4 : Paiement ──────────────────────────────────────────────────────
 function StepPayment({ investment }: { investment: Investment }) {
   const iban = investment.project?.virtualIban ?? 'FR76 1234 5678 9012 3456 7890 123';
 
@@ -307,9 +368,10 @@ function StepPayment({ investment }: { investment: Investment }) {
 
 // ─── Page principale ─────────────────────────────────────────────────────────
 const STEPS: { key: Step; label: string; icon: any }[] = [
-  { key: 'amount',    label: 'Montant',   icon: CreditCard },
-  { key: 'sign',      label: 'Signature', icon: FileText },
-  { key: 'payment',   label: 'Paiement',  icon: CreditCard },
+  { key: 'amount',         label: 'Montant',     icon: CreditCard },
+  { key: 'sign',           label: 'Signature',   icon: FileText },
+  { key: 'pending_cosign', label: 'Co-signature', icon: Clock },
+  { key: 'payment',        label: 'Virement',    icon: CreditCard },
 ];
 
 export default function InvestPage({ params }: { params: Promise<{ projectId: string }> }) {
@@ -317,7 +379,10 @@ export default function InvestPage({ params }: { params: Promise<{ projectId: st
   const { user } = useAuth();
   const router = useRouter();
 
-  const [step, setStep] = useState<Step>('amount');
+  const stepFromUrl = typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('step') as Step | null)
+    : null;
+  const [step, setStep] = useState<Step>(stepFromUrl ?? 'amount');
   const [investment, setInvestment] = useState<Investment | null>(null);
   const [resumeChecked, setResumeChecked] = useState(false);
 
@@ -337,11 +402,16 @@ export default function InvestPage({ params }: { params: Promise<{ projectId: st
     if (resumeChecked || !myInvestments) return;
     setResumeChecked(true);
     const existing = myInvestments.find(
-      (i: any) => i.project?.id === projectId && ['PENDING_SIGNATURE', 'PENDING_PAYMENT'].includes(i.status)
+      (i: any) => i.project?.id === projectId && ['PENDING_SIGNATURE', 'PENDING_COSIGN', 'PENDING_PAYMENT'].includes(i.status)
     );
     if (existing) {
       setInvestment(existing);
-      setStep(existing.status === 'PENDING_PAYMENT' ? 'payment' : 'sign');
+      // Si l'URL force une étape (ex: ?step=payment), on la respecte
+      if (!stepFromUrl) {
+        if (existing.status === 'PENDING_PAYMENT') setStep('payment');
+        else if (existing.status === 'PENDING_COSIGN') setStep('pending_cosign');
+        else setStep('sign');
+      }
     }
   }, [myInvestments, projectId, resumeChecked]);
 
@@ -404,8 +474,11 @@ export default function InvestPage({ params }: { params: Promise<{ projectId: st
           {step === 'sign' && investment && (
             <StepSign
               investment={investment}
-              onNext={(inv) => { setInvestment(inv); setStep('payment'); }}
+              onNext={(inv) => { setInvestment(inv); setStep('pending_cosign'); }}
             />
+          )}
+          {step === 'pending_cosign' && investment && (
+            <StepPendingCosign investment={investment} />
           )}
           {step === 'payment' && investment && (
             <StepPayment investment={investment} />

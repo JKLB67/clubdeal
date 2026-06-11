@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
-import { X, Loader2, AlertCircle, Download, ZoomIn, ZoomOut, Printer } from 'lucide-react';
+import { X, Loader2, AlertCircle, ZoomIn, ZoomOut, Printer, Loader } from 'lucide-react';
 
 interface PdfViewerProps {
   /** API path (e.g. /api/projects/:id/documents/:docId/download) */
@@ -24,6 +24,7 @@ export function PdfViewer({ path, filename = 'document', isHtml = false, hideAct
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [fontStep, setFontStep] = useState(DEFAULT_STEP);
+  const [flattening, setFlattening] = useState(false);
 
   useEffect(() => {
     let url: string;
@@ -52,23 +53,19 @@ export function PdfViewer({ path, filename = 'document', isHtml = false, hideAct
     return () => iframe.removeEventListener('load', apply);
   }, [fontStep, blobUrl, isHtml]);
 
-  function handleDownload() {
-    if (blobUrl) {
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-  }
-
-  function handlePrint() {
+  async function handleFlattenDownload() {
+    setFlattening(true);
     try {
-      iframeRef.current?.contentWindow?.print();
-    } catch {
-      window.print();
+      // HTML contracts: /api/investments/:id/bulletin → /api/investments/:id/bulletin/flatten
+      // Binary PDFs:    /api/projects/:id/documents/:docId/download → .../flatten
+      const flattenPath = isHtml
+        ? `${path}/flatten`
+        : path.replace(/\/download$/, '/flatten');
+      await api.download(flattenPath, `${filename.replace(/\.pdf$/i, '')}-confidentiel.pdf`);
+    } catch (e: any) {
+      alert(`Erreur : ${e.message}`);
+    } finally {
+      setFlattening(false);
     }
   }
 
@@ -102,27 +99,20 @@ export function PdfViewer({ path, filename = 'document', isHtml = false, hideAct
             </div>
           )}
 
-          {/* Print to PDF */}
-          {blobUrl && !hideActions && (
+          {/* PDF sécurisé (aplati, incopiable) */}
+          {!hideActions && (
             <button
-              onClick={handlePrint}
-              title="Imprimer / Sauvegarder en PDF"
-              className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 transition-colors"
+              onClick={handleFlattenDownload}
+              disabled={flattening}
+              title="Télécharger en PDF sécurisé (non copiable)"
+              className={`flex items-center gap-1.5 text-sm border rounded-lg px-3 py-1.5 transition-colors ${
+                flattening
+                  ? 'text-blue-400 border-blue-200 bg-blue-50 animate-pulse cursor-wait'
+                  : 'text-gray-600 hover:text-blue-700 border-gray-200 hover:border-blue-300'
+              }`}
             >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">PDF</span>
-            </button>
-          )}
-
-          {/* Download raw file */}
-          {blobUrl && !hideActions && (
-            <button
-              onClick={handleDownload}
-              title="Télécharger"
-              className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-blue-300 transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Télécharger</span>
+              {flattening ? <Loader className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+              <span className="hidden sm:inline">{flattening ? 'Génération...' : 'PDF'}</span>
             </button>
           )}
 

@@ -545,7 +545,7 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
       where: { id: investmentId },
       data: {
         bulletinSignedAt: new Date(),
-        status: 'PENDING_PAYMENT',
+        status: 'PENDING_COSIGN',
         esignSignedAt: new Date(),
       },
     });
@@ -580,7 +580,7 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
 
     const updated = await this.prisma.investment.update({
       where: { id: investmentId },
-      data: { contratEmitterSignedAt: new Date() },
+      data: { contratEmitterSignedAt: new Date(), status: 'PENDING_PAYMENT' },
     });
 
     // Notify investor
@@ -590,6 +590,30 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
       `<p>Bonjour,</p>
        <p>Votre contrat d'émission d'obligations pour le projet <strong>${inv.project.name}</strong> a été co-signé par l'émetteur.</p>
        <p>Les deux parties ont signé. Votre dossier est maintenant complet.</p>`,
+    );
+
+    return updated;
+  }
+
+  async rejectInvestment(adminTenantId: string, investmentId: string, reason: string) {
+    const inv = await this.prisma.investment.findFirst({
+      where: { id: investmentId, tenantId: adminTenantId },
+      include: { user: true, project: true },
+    });
+    if (!inv) throw new NotFoundException('Investissement introuvable');
+
+    const updated = await this.prisma.investment.update({
+      where: { id: investmentId },
+      data: { status: 'REJECTED', rejectionReason: reason, rejectedAt: new Date() },
+    });
+
+    await this.email.send(
+      inv.user.email,
+      `Signature refusée – ${inv.project.name}`,
+      `<p>Bonjour,</p>
+       <p>Votre souscription au projet <strong>${inv.project.name}</strong> a été refusée par l'émetteur.</p>
+       ${reason ? `<p><strong>Motif :</strong> ${reason}</p>` : ''}
+       <p>Veuillez contacter votre conseiller pour plus d'informations.</p>`,
     );
 
     return updated;

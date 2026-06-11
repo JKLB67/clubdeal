@@ -62,10 +62,10 @@ export function Navbar() {
               </div>
               <button
                 onClick={handleLogout}
-                title="Déconnexion"
                 className="flex items-center gap-1 text-sm text-gray-400 hover:text-red-600 transition-colors px-2 py-2 rounded-lg hover:bg-red-50"
               >
                 <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Déconnexion</span>
               </button>
             </div>
           </>

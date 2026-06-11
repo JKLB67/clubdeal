@@ -66,4 +66,11 @@ export class UsersController {
   deleteUser(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.usersService.deleteUser(user.tenantId, id);
   }
+
+  @Patch('admin/:id/kyc')
+  @Roles('ADMIN' as any)
+  @ApiOperation({ summary: '[Admin] Forcer le statut KYC manuellement' })
+  overrideKyc(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { status: string }) {
+    return this.usersService.overrideKyc(user.tenantId, id, body.status);
+  }
 }

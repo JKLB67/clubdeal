@@ -252,6 +252,13 @@ export class ProjectsService {
     return { isFavorite, favoritesCount };
   }
 
+  async getDocumentsByProject(projectId: string) {
+    return this.prisma.projectDocument.findMany({
+      where: { projectId },
+      orderBy: { orderIndex: 'asc' },
+    });
+  }
+
   // ── Alertes ─────────────────────────────────────────────────────────────────
 
   async toggleAlert(userId: string, projectId: string, type: 'DOCUMENT_CHANGE' | 'COLLECTION_START') {

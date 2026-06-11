@@ -12,7 +12,7 @@ import { FileText, ExternalLink, ZoomIn } from 'lucide-react';
 interface MyInvestment {
   id: string;
   amount: string;
-  status: 'PENDING_SIGNATURE' | 'PENDING_PAYMENT' | 'CONFIRMED' | 'FAILED' | 'CANCELLED';
+  status: 'PENDING_SIGNATURE' | 'PENDING_COSIGN' | 'PENDING_PAYMENT' | 'CONFIRMED' | 'FAILED' | 'CANCELLED' | 'REJECTED';
   createdAt: string;
   confirmedAt?: string;
   bulletinSignedAt?: string | null;
@@ -21,19 +21,20 @@ interface MyInvestment {
   project: { id: string; name: string; address: string; annualYield: string; durationMonths: number; virtualIban?: string };
 }
 
-const STATUS_CONFIG = {
-  PENDING_SIGNATURE: { label: 'Signature en attente', className: 'bg-yellow-100 text-yellow-700' },
-  PENDING_PAYMENT:   { label: 'Paiement en attente',  className: 'bg-blue-100 text-blue-700' },
-  CONFIRMED:         { label: 'Confirmé',              className: 'bg-green-100 text-green-700' },
-  FAILED:            { label: 'Échoué',                className: 'bg-red-100 text-red-600' },
-  CANCELLED:         { label: 'Annulé',                className: 'bg-gray-100 text-gray-500' },
+const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+  PENDING_SIGNATURE: { label: 'Signature en attente',    className: 'bg-yellow-100 text-yellow-700' },
+  PENDING_COSIGN:    { label: 'Co-signature en attente', className: 'bg-purple-100 text-purple-700' },
+  PENDING_PAYMENT:   { label: 'Paiement en attente',     className: 'bg-blue-100 text-blue-700' },
+  CONFIRMED:         { label: 'Confirmé',                className: 'bg-green-100 text-green-700' },
+  REJECTED:          { label: 'Refusé',                  className: 'bg-red-100 text-red-600' },
+  FAILED:            { label: 'Échoué',                  className: 'bg-red-100 text-red-600' },
+  CANCELLED:         { label: 'Annulé',                  className: 'bg-gray-100 text-gray-500' },
 };
 
 type DocType = { invId: string; type: 'contrat' | 'bulletin'; label: string };
 
 export default function MyInvestmentsPage() {
   const [viewDoc, setViewDoc] = useState<DocType | null>(null);
-  const [showIban, setShowIban] = useState<Record<string, boolean>>({});
 
   const { data: investments = [], isLoading } = useQuery({
     queryKey: ['my-investments'],
@@ -41,8 +42,8 @@ export default function MyInvestmentsPage() {
     refetchInterval: 10_000,
   });
 
-  // Exclure les investissements annulés
-  const active = investments.filter((i) => i.status !== 'CANCELLED');
+  // Exclure les investissements annulés et refusés
+  const active = investments.filter((i) => !['CANCELLED', 'REJECTED'].includes(i.status));
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -139,39 +140,22 @@ export default function MyInvestmentsPage() {
                       </Link>
                     )}
 
-                    {/* IBAN — visible uniquement quand les 2 documents sont signés */}
+                    {/* En attente de co-signature émetteur */}
+                    {inv.status === 'PENDING_COSIGN' && (
+                      <span className="flex items-center gap-1.5 text-xs text-purple-600 font-medium bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1.5">
+                        ⏳ En attente de co-signature
+                      </span>
+                    )}
+
+                    {/* Effectuer le paiement — redirige vers la page virement */}
                     {inv.status === 'PENDING_PAYMENT' && (
-                      <div className="flex items-center gap-2">
-                        {bothSigned ? (
-                          <>
-                            {showIban[inv.id] ? (
-                              <div className="text-xs text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-2">
-                                IBAN :{' '}
-                                <code className="font-mono">{inv.project.virtualIban ?? '—'}</code>
-                                <button
-                                  onClick={() => setShowIban((s) => ({ ...s, [inv.id]: false }))}
-                                  className="text-blue-400 hover:text-blue-700 ml-1"
-                                >✕</button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setShowIban((s) => ({ ...s, [inv.id]: true }))}
-                                className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-medium border border-blue-300 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
-                              >
-                                Voir l'IBAN
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          <button
-                            disabled
-                            title="Signez les 2 documents pour accéder à l'IBAN"
-                            className="flex items-center gap-1.5 text-xs text-gray-400 font-medium border border-gray-200 rounded-lg px-2.5 py-1.5 cursor-not-allowed"
-                          >
-                            🔒 Voir l'IBAN (signature requise)
-                          </button>
-                        )}
-                      </div>
+                      <Link
+                        href={`/invest/${inv.project.id}?step=payment`}
+                        className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-medium border border-blue-300 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Effectuer le paiement
+                      </Link>
                     )}
                   </div>
                 </div>

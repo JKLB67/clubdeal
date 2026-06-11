@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
@@ -9,14 +9,18 @@ import { useAuth } from '@/context/auth';
 import { api } from '@/lib/api';
 import { Project } from '@/types';
 import { formatEuros, progressPercent, daysRemaining } from '@/lib/utils';
-import { MapPin, TrendingUp, Clock, FileText, ChevronLeft, ChevronRight, X, ZoomIn, CalendarClock, Euro, Heart, Bell, Download, Archive } from 'lucide-react';
+import { MapPin, TrendingUp, Clock, FileText, ChevronLeft, ChevronRight, X, ZoomIn, CalendarClock, Euro, Heart, Bell, Download } from 'lucide-react';
 import { PdfViewer } from '@/components/ui/PdfViewer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-function YieldSimulator({ annualYield, durationMonths, minInvestment }: { annualYield: string; durationMonths: number; minInvestment?: string | null }) {
+function YieldSimulator({ annualYield, durationMonths, minInvestment, collectionGoal, collectedAmount }: {
+  annualYield: string; durationMonths: number; minInvestment?: string | null;
+  collectionGoal: string; collectedAmount: string;
+}) {
   const minEuros = minInvestment ? Math.ceil(Number(minInvestment) / 100) : 1000;
-  const [amount, setAmount] = useState(String(Math.max(minEuros, 10000)));
+  const availableEuros = Math.floor((Number(collectionGoal) - Number(collectedAmount)) / 100);
+  const [amount, setAmount] = useState(String(Math.min(Math.max(minEuros, 10000), availableEuros)));
 
   const invested = parseFloat(amount) || 0;
   const yieldRate = parseFloat(annualYield) / 100;
@@ -24,6 +28,7 @@ function YieldSimulator({ annualYield, durationMonths, minInvestment }: { annual
   const grossReturn = invested * yieldRate * years;
   const totalGross = invested + grossReturn;
   const belowMin = invested > 0 && invested < minEuros;
+  const aboveMax = invested > 0 && availableEuros > 0 && invested > availableEuros;
 
   return (
     <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
@@ -32,19 +37,24 @@ function YieldSimulator({ annualYield, durationMonths, minInvestment }: { annual
         <label className="block text-sm font-medium text-gray-700 mb-1.5">Montant investi (€)</label>
         <input
           type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
-          min={minEuros} step={1000}
-          className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white ${belowMin ? 'border-red-400 focus:ring-red-400' : 'border-blue-200 focus:ring-blue-500'}`}
+          min={minEuros} max={availableEuros} step={1000}
+          className={`w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 bg-white ${belowMin || aboveMax ? 'border-red-400 focus:ring-red-400' : 'border-blue-200 focus:ring-blue-500'}`}
         />
       </div>
-      {belowMin && (
+      {aboveMax && (
+        <p className="text-red-600 text-xs font-medium mb-3">
+          ⚠️ Dépasse le montant disponible : {availableEuros.toLocaleString('fr-FR')} €
+        </p>
+      )}
+      {belowMin && !aboveMax && (
         <p className="text-red-600 text-xs font-medium mb-3">
           ⚠️ Montant minimum : {minEuros.toLocaleString('fr-FR')} €
         </p>
       )}
-      {!belowMin && (
-        <p className="text-xs text-gray-400 mb-3">Minimum : {minEuros.toLocaleString('fr-FR')} €</p>
+      {!belowMin && !aboveMax && (
+        <p className="text-xs text-gray-400 mb-3">Min : {minEuros.toLocaleString('fr-FR')} € · Max disponible : {availableEuros.toLocaleString('fr-FR')} €</p>
       )}
-      {invested > 0 && !belowMin && (
+      {invested > 0 && !belowMin && !aboveMax && (
         <div className="space-y-3 pt-2 border-t border-blue-200">
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Capital investi</span>
@@ -84,15 +94,6 @@ function DocumentsSection({ projectId, documents, isLoggedIn }: {
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-bold text-gray-900">Documents du projet</h2>
-        {isLoggedIn && (
-          <button
-            onClick={() => api.download(`/api/projects/${projectId}/documents/download-all`, `documents-${projectId}.zip`)}
-            className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium"
-          >
-            <Archive className="w-3.5 h-3.5" />
-            Tout télécharger
-          </button>
-        )}
       </div>
 
       <div className="space-y-2">
@@ -258,6 +259,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   const { user } = useAuth();
   const [localProject, setLocalProject] = useState<Project | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const { data: fetched, isLoading } = useQuery({
     queryKey: ['project', id],
@@ -272,6 +274,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   });
 
   const project = localProject ?? fetched;
+
+  useEffect(() => {
+    if (!project?.address) return;
+    fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(project.address)}&limit=1`)
+      .then((r) => r.json())
+      .then((data) => {
+        const feature = data?.features?.[0];
+        if (feature) {
+          const [lng, lat] = feature.geometry.coordinates;
+          setCoords({ lat, lng });
+        }
+      })
+      .catch(() => {});
+  }, [project?.address]);
 
   const existingInvestment = myInvestments.find(
     (i) => i.project?.id === id && !['CANCELLED', 'FAILED'].includes(i.status)
@@ -310,6 +326,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   if (!project) return null;
 
   const progress = progressPercent(project!.collectedAmount, project!.collectionGoal);
+  const isFull = Number(project!.collectedAmount) >= Number(project!.collectionGoal);
   const kycValidated = user?.statusKyc === 'VALIDATED';
   const days = daysRemaining(project!.closingDate);
   const daysOpen = daysRemaining(project!.openingDate);
@@ -318,7 +335,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const bellOpen = (project!.myAlerts ?? []).includes('COLLECTION_START');
   const favCount = project!._count?.favorites ?? 0;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project!.address)}`;
-  const streetviewUrl = `https://www.google.com/maps?q=${encodeURIComponent(project!.address)}&layer=c`;
+  const streetviewUrl = coords
+    ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}&layer=c&cbll=${coords.lat},${coords.lng}`
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -369,11 +388,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   title="Voir sur Google Maps">
                   <MapPin className="w-3 h-3" /> Maps
                 </a>
-                <a href={streetviewUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-green-600 hover:text-green-800 border border-green-200 rounded-md px-2 py-0.5 hover:bg-green-50 transition-colors"
-                  title="StreetView">
-                  👁 StreetView
-                </a>
+                {streetviewUrl && (
+                  <a href={streetviewUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-green-600 hover:text-green-800 border border-green-200 rounded-md px-2 py-0.5 hover:bg-green-50 transition-colors"
+                    title="StreetView">
+                    👁 StreetView
+                  </a>
+                )}
               </div>
               {isUpcoming && (
                 <div className="mt-3 flex items-center gap-2 bg-purple-50 border border-purple-100 rounded-xl px-4 py-2.5">
@@ -419,7 +440,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             )}
 
             {/* Simulateur */}
-            <YieldSimulator annualYield={project!.annualYield} durationMonths={project!.durationMonths} minInvestment={project!.minInvestment} />
+            <YieldSimulator annualYield={project!.annualYield} durationMonths={project!.durationMonths} minInvestment={project!.minInvestment} collectionGoal={project!.collectionGoal} collectedAmount={project!.collectedAmount} />
           </div>
 
           {/* Sidebar */}
@@ -474,6 +495,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 >
                   Se connecter pour investir
                 </Link>
+              ) : isFull ? (
+                <button
+                  disabled
+                  className="w-full bg-gray-200 text-gray-500 font-semibold py-3 rounded-xl cursor-not-allowed"
+                >
+                  Collecte complète
+                </button>
               ) : existingInvestment ? (
                 <Link
                   href={`/invest/${project!.id}`}

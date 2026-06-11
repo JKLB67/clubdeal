@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navbar } from '@/components/layout/Navbar';
 import { useAuth } from '@/context/auth';
@@ -35,10 +35,34 @@ export default function ProfilePage() {
   });
 
   // Pré-remplir quand les données arrivent
-  useState(() => {
-    if (me?.physicalProfile) setPhys({ ...phys, ...me.physicalProfile, birthDate: me.physicalProfile.birthDate?.slice(0, 10) ?? '' });
-    if (me?.legalProfile) setLegal({ ...legal, ...me.legalProfile });
-  });
+  useEffect(() => {
+    if (me?.physicalProfile) {
+      const p = me.physicalProfile;
+      setPhys({
+        firstName: p.firstName ?? '',
+        lastName: p.lastName ?? '',
+        birthDate: p.birthDate?.slice(0, 10) ?? '',
+        birthPlace: p.birthPlace ?? '',
+        birthCountry: p.birthCountry ?? '',
+        nationality: p.nationality ?? '',
+        addressLine1: p.addressLine1 ?? '',
+        postalCode: p.postalCode ?? '',
+        city: p.city ?? '',
+        country: p.country ?? 'France',
+      });
+    }
+    if (me?.legalProfile) {
+      const l = me.legalProfile;
+      setLegal({
+        companyName: l.companyName ?? '',
+        legalForm: l.legalForm ?? 'SAS',
+        siren: l.siren ?? '',
+        siret: l.siret ?? '',
+        registeredAddress: l.registeredAddress ?? '',
+        legalRepresentativeId: l.legalRepresentativeId ?? '',
+      });
+    }
+  }, [me]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -68,6 +92,16 @@ export default function ProfilePage() {
         </div>
 
         <form onSubmit={save} className="space-y-4">
+          <div className="bg-white border border-gray-100 rounded-xl p-5">
+            <label className="block text-xs text-gray-500 mb-1">Adresse email</label>
+            <input
+              type="email"
+              value={user?.email ?? ''}
+              disabled
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed"
+            />
+          </div>
+
           {msg && (
             <div className={`text-sm rounded-xl px-4 py-3 ${msg.startsWith('Erreur') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
               {msg}

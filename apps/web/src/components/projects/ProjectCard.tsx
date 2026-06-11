@@ -19,6 +19,7 @@ export function ProjectCard({ project: initial }: { project: Project }) {
   const daysClose = daysRemaining(project.closingDate);
   const daysOpen  = daysRemaining(project.openingDate);
   const isUpcoming = daysOpen !== null && daysOpen > 0;
+  const isFull = Number(project.collectedAmount) >= Number(project.collectionGoal);
 
   function prev(e: React.MouseEvent) { e.preventDefault(); setIdx((i) => (i - 1 + photos.length) % photos.length); }
   function next(e: React.MouseEvent) { e.preventDefault(); setIdx((i) => (i + 1) % photos.length); }
@@ -94,7 +95,12 @@ export function ProjectCard({ project: initial }: { project: Project }) {
           </button>
         )}
 
-        {/* Badge "Bientôt" pour les projets à venir */}
+        {/* Badge "Bientôt" / "Complet" */}
+        {isFull && !isUpcoming && (
+          <div className="absolute bottom-2 left-2 bg-gray-800 text-white text-xs font-semibold px-2.5 py-1 rounded-full">
+            Collecte complète
+          </div>
+        )}
         {isUpcoming && (
           <div className="absolute bottom-2 left-2 bg-purple-600 text-white text-xs font-semibold px-2.5 py-1 rounded-full">
             Ouverture dans {daysOpen}j
@@ -163,6 +169,10 @@ export function ProjectCard({ project: initial }: { project: Project }) {
                 <Bell className="w-4 h-4" />
               </button>
             )}
+          </div>
+        ) : isFull ? (
+          <div className="block w-full text-center bg-gray-100 text-gray-500 font-medium py-2.5 rounded-xl text-sm cursor-default">
+            Collecte complète
           </div>
         ) : (
           <Link href={`/projects/${project.id}`}

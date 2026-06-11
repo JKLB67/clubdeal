@@ -111,6 +111,14 @@ export class UsersService {
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
   }
 
+  async overrideKyc(tenantId: string, userId: string, status: string) {
+    const allowed = ['NOT_INITIATED', 'PENDING', 'VALIDATED'];
+    if (!allowed.includes(status)) throw new BadRequestException('Statut KYC invalide');
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    return this.prisma.user.update({ where: { id: userId }, data: { statusKyc: status as any } });
+  }
+
   sanitize(user: User) {
     const { passwordHash: _, ...safe } = user;
     return safe;

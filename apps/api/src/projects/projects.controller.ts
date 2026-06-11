@@ -29,6 +29,46 @@ interface AuthUser { id: string; tenantId: string; role: string }
 const photoStorage = memoryStorage();
 const docStorage = memoryStorage();
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { createCanvas } = require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { PDFDocument } = require('pdf-lib') as typeof import('pdf-lib');
+
+/** Rend chaque page d'un PDF en image PNG et reconstruit un PDF images-only (texte incopiable). */
+async function flattenPdf(inputBytes: Uint8Array | Buffer): Promise<Uint8Array> {
+  // Import dynamique ESM obligatoire pour pdfjs-dist v6
+  const pdfjsLib = await (Function('return import("pdfjs-dist/legacy/build/pdf.mjs")')() as Promise<any>);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(inputBytes), disableWorker: true });
+  const pdfDoc = await loadingTask.promise;
+  const numPages = pdfDoc.numPages;
+
+  const outDoc = await PDFDocument.create();
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 }); // 144 dpi (~2× 72dpi)
+
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d');
+
+    // Fond blanc
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await page.render({ canvasContext: ctx as any, viewport }).promise;
+
+    const pngBuffer = canvas.toBuffer('image/png');
+    const pngImage = await outDoc.embedPng(pngBuffer);
+
+    const outPage = outDoc.addPage([viewport.width, viewport.height]);
+    outPage.drawImage(pngImage, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+  }
+
+  return outDoc.save();
+}
+
 @ApiTags('Projects')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -143,7 +183,6 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Télécharger un document' })
   async downloadDocument(@Param('id') id: string, @Param('docId') docId: string, @CurrentUser() user: AuthUser, @Res() res: Response) {
     const doc = await this.projectsService.getDocumentPath(id, docId);
-    // Extraire le nom de fichier depuis l'URL
     const filename = doc.url.split('/').pop()!;
     const filePath = join(process.cwd(), 'uploads', 'documents', filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Fichier introuvable' });
@@ -152,18 +191,32 @@ export class ProjectsController {
     fs.createReadStream(filePath).pipe(res as any);
   }
 
+  // Aplatir un document PDF (images uniquement, texte incopiable)
+  @Get(':id/documents/:docId/flatten')
+  @ApiOperation({ summary: 'PDF aplati non copiable' })
+  async flattenDocument(@Param('id') id: string, @Param('docId') docId: string, @Res() res: Response) {
+    const doc = await this.projectsService.getDocumentPath(id, docId);
+    const filename = doc.url.split('/').pop()!;
+    const filePath = join(process.cwd(), 'uploads', 'documents', filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Fichier introuvable' });
+
+    const pdfBytes = fs.readFileSync(filePath);
+    const flatBytes = await flattenPdf(pdfBytes);
+
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent((doc.label ?? doc.name).replace(/\.pdf$/i, '') + '-confidentiel.pdf')}"`);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.end(flatBytes);
+  }
+
   // Télécharger tous les documents en ZIP
   @Get(':id/documents/download-all')
   @ApiOperation({ summary: 'Télécharger tous les documents en ZIP' })
   async downloadAllDocuments(
     @Param('id') id: string,
-    @Req() req: Request & { tenantId: string },
     @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    const tenantId = user?.tenantId ?? req.tenantId;
-    const project = await this.projectsService.findOne(tenantId, id);
-    const docs = (project as any).documents as any[];
+    const docs = await this.projectsService.getDocumentsByProject(id);
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="documents-${id}.zip"`);
     const archive = archiver('zip', { zlib: { level: 6 } });

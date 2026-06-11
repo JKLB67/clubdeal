@@ -33,7 +33,10 @@ async function fetchBlob(path: string): Promise<Blob> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (!res.ok) throw new Error('Fichier inaccessible');
+  if (!res.ok) {
+    const error = await res.json().catch(() => null);
+    throw new Error(error?.message ?? 'Fichier inaccessible');
+  }
   return res.blob();
 }
 

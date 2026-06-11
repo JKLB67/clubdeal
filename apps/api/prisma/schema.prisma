@@ -253,6 +253,9 @@ model Investment {
   contratInvestorSignedAt DateTime?
   contratEmitterSignedAt  DateTime?
 
+  rejectionReason   String?
+  rejectedAt        DateTime?
+
   pspTransactionId  String?
   confirmedAt       DateTime?
 
@@ -374,10 +377,12 @@ enum ProjectDocumentType {
 
 enum InvestmentStatus {
   PENDING_SIGNATURE
+  PENDING_COSIGN
   PENDING_PAYMENT
   CONFIRMED
   FAILED
   CANCELLED
+  REJECTED
 }
 
 enum WebhookProvider {
