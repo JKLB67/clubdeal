@@ -20,19 +20,30 @@ export class UsersService {
     return safe;
   }
 
+  private sanitizeProfileData(data: Record<string, unknown>): Record<string, unknown> {
+    // Supprimer les champs vides pour éviter les erreurs de type (ex: DateTime = "")
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== '' && v !== null && v !== undefined) cleaned[k] = v;
+    }
+    return cleaned;
+  }
+
   async updatePhysicalProfile(userId: string, data: Record<string, unknown>) {
+    const clean = this.sanitizeProfileData(data);
     return this.prisma.userPhysicalProfile.upsert({
       where: { userId },
-      create: { userId, ...data } as any,
-      update: data as any,
+      create: { userId, firstName: '', lastName: '', ...clean } as any,
+      update: clean as any,
     });
   }
 
   async updateLegalProfile(userId: string, data: Record<string, unknown>) {
+    const clean = this.sanitizeProfileData(data);
     return this.prisma.userLegalProfile.upsert({
       where: { userId },
-      create: { userId, ...data } as any,
-      update: data as any,
+      create: { userId, companyName: '', ...clean } as any,
+      update: clean as any,
     });
   }
 
@@ -56,7 +67,7 @@ export class UsersService {
 
   async getByIdForAdmin(tenantId: string, userId: string) {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, tenantId },
+      where: { id: userId },  // pas de restriction tenantId — le guard ADMIN suffit
       include: {
         physicalProfile: true,
         legalProfile: { include: { ubos: true } },
@@ -81,20 +92,20 @@ export class UsersService {
   }
 
   async suspendUser(tenantId: string, userId: string, suspend: boolean) {
-    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
     return this.prisma.user.update({ where: { id: userId }, data: { isSuspended: suspend } });
   }
 
   async deleteUser(tenantId: string, userId: string) {
-    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
     await this.prisma.user.delete({ where: { id: userId } });
   }
 
   async resetPassword(tenantId: string, userId: string, newPassword: string) {
     if (!newPassword || newPassword.length < 8) throw new BadRequestException('Mot de passe trop court (8 caractères min)');
-    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
     const hash = await bcrypt.hash(newPassword, 10);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });

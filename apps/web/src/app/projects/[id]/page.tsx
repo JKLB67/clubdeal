@@ -318,7 +318,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const bellOpen = (project!.myAlerts ?? []).includes('COLLECTION_START');
   const favCount = project!._count?.favorites ?? 0;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project!.address)}`;
-  const streetviewUrl = `https://www.google.com/maps?layer=c&cbll=&q=${encodeURIComponent(project!.address)}`;
+  const streetviewUrl = `https://www.google.com/maps?q=${encodeURIComponent(project!.address)}&layer=c`;
 
   return (
     <div className="min-h-screen flex flex-col">

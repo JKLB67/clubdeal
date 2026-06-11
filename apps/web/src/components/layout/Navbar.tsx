@@ -33,17 +33,19 @@ export function Navbar() {
               <span className="hidden sm:inline">Collectes</span>
             </Link>
 
+            {/* Lien investissements : tous les utilisateurs avec KYC validé (ou en cours) */}
+            {user.statusKyc !== 'NOT_INITIATED' && (
+              <Link href="/account/investments" className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                <Briefcase className="w-4 h-4" />
+                <span className="hidden sm:inline">Mes investissements</span>
+              </Link>
+            )}
+
             {user.role === 'INVESTOR' && (
-              <>
-                <Link href="/account/investments" className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Briefcase className="w-4 h-4" />
-                  <span className="hidden sm:inline">Mes investissements</span>
-                </Link>
-                <Link href="/account/profile" className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
-                  <BadgeCheck className="w-4 h-4" />
-                  <span className="hidden sm:inline">{user.statusKyc === 'VALIDATED' ? 'Mon profil' : 'Compléter mon profil'}</span>
-                </Link>
-              </>
+              <Link href="/account/profile" className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+                <BadgeCheck className="w-4 h-4" />
+                <span className="hidden sm:inline">{user.statusKyc === 'VALIDATED' ? 'Mon profil' : 'Compléter mon profil'}</span>
+              </Link>
             )}
 
             {(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') && (

@@ -66,10 +66,12 @@ function buildWatermark(text: string): string {
 }
 
 function buildStyle(watermarkText: string, isSigned: boolean): string {
-  const wm = isSigned ? '' : buildWatermark(watermarkText);
-  const userSelectRule = isSigned ? '' : '-webkit-user-select:none;user-select:none;';
-  const bgRule = wm ? 'background-image:' + wm + ';background-size:500px 500px;' : '';
-  const antiCopyScript = isSigned ? '' : [
+  // Watermark: toujours présent — "BROUILLON" avant signature, "CONFIDENTIEL" après
+  const wmLabel = isSigned ? 'CONFIDENTIEL' : watermarkText;
+  const wm = buildWatermark(wmLabel);
+  const bgRule = 'background-image:' + wm + ';background-size:500px 500px;';
+  // Protection copie : toujours active, signé ou non
+  const antiCopyScript = [
     '<script>',
     "document.addEventListener('contextmenu',function(e){e.preventDefault();});",
     "document.addEventListener('keydown',function(e){",
@@ -81,7 +83,7 @@ function buildStyle(watermarkText: string, isSigned: boolean): string {
 
   return [
     '<style>',
-    '  *{box-sizing:border-box;margin:0;padding:0;' + userSelectRule + '}',
+    '  *{box-sizing:border-box;margin:0;padding:0;-webkit-user-select:none;user-select:none;}',
     "  body{font-family:'Times New Roman',Times,serif;font-size:var(--fs,11pt);line-height:1.6;",
     '       color:#000;background:#fff;padding:40px 60px;max-width:800px;margin:0 auto;' + bgRule + '}',
     '  h1{font-size:14pt;text-align:center;text-transform:uppercase;font-weight:bold;margin-bottom:24px;}',
