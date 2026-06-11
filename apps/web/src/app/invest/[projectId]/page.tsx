@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -9,7 +9,8 @@ import { useAuth } from '@/context/auth';
 import { api } from '@/lib/api';
 import { Project } from '@/types';
 import { formatEuros } from '@/lib/utils';
-import { CheckCircle, FileText, CreditCard, ChevronLeft, Loader2, ExternalLink } from 'lucide-react';
+import { CheckCircle, FileText, CreditCard, ChevronLeft, Loader2, ZoomIn } from 'lucide-react';
+import { PdfViewer } from '@/components/ui/PdfViewer';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -32,18 +33,20 @@ function StepAmount({
   project: Project;
   onNext: (investment: Investment) => void;
 }) {
-  const [amount, setAmount] = useState('');
+  const minEuros = project.minInvestment ? Math.ceil(Number(project.minInvestment) / 100) : 1000;
+  const [amount, setAmount] = useState(String(Math.max(minEuros, 10000)));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const numAmount = parseFloat(amount) || 0;
+  const belowMin = numAmount > 0 && numAmount < minEuros;
   const yieldRate = parseFloat(project.annualYield) / 100;
   const years = project.durationMonths / 12;
   const grossReturn = numAmount * yieldRate * years;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (numAmount < 1000) return setError('Montant minimum : 1 000 €');
+    if (numAmount < minEuros) return setError(`Montant minimum : ${minEuros.toLocaleString('fr-FR')} €`);
     setError('');
     setLoading(true);
     try {
@@ -74,20 +77,24 @@ function StepAmount({
           <div className="relative">
             <input
               type="number"
-              min={1000}
-              step={1000}
+              min={minEuros}
+              step={Math.min(minEuros, 1000)}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
-              placeholder="10 000"
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder={minEuros.toLocaleString('fr-FR')}
+              className={`w-full border rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:ring-2 ${belowMin ? 'border-red-400 focus:ring-red-400' : 'border-gray-200 focus:ring-blue-500'}`}
             />
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
           </div>
-          <p className="text-xs text-gray-400 mt-1">Minimum : 1 000 €</p>
+          {belowMin ? (
+            <p className="text-xs text-red-600 mt-1 font-medium">Montant minimum : {minEuros.toLocaleString('fr-FR')} €</p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-1">Minimum : {minEuros.toLocaleString('fr-FR')} €</p>
+          )}
         </div>
 
-        {numAmount >= 1000 && (
+        {numAmount >= minEuros && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-2">
             <p className="text-sm font-semibold text-blue-800">Simulation</p>
             <div className="flex justify-between text-sm">
@@ -107,7 +114,7 @@ function StepAmount({
 
         <button
           type="submit"
-          disabled={loading || numAmount < 1000}
+          disabled={loading || numAmount < minEuros}
           className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -118,75 +125,121 @@ function StepAmount({
   );
 }
 
-// ─── Étape 2 : Signature ─────────────────────────────────────────────────────
+// ─── Étape 2 : Signature (2 documents) ───────────────────────────────────────
 function StepSign({
-  investment,
+  investment: initialInv,
   onNext,
 }: {
   investment: Investment;
   onNext: (inv: Investment) => void;
 }) {
-  const [loading, setLoading] = useState(false);
+  const [inv, setInv] = useState(initialInv);
+  const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState('');
 
-  async function handleSign() {
-    setLoading(true);
-    setError('');
+  const contratSigned  = !!(inv as any).contratInvestorSignedAt;
+  const bulletinSigned = !!(inv as any).bulletinSignedAt;
+
+  async function signBulletin() {
+    setLoading('bulletin'); setError('');
     try {
-      const updated = await api.post<Investment>(`/api/investments/${investment.id}/sign`, {});
-      onNext(updated);
-    } catch (err: any) {
-      setError(err.message ?? 'Erreur lors de la signature');
-    } finally {
-      setLoading(false);
-    }
+      const updated = await api.post<Investment>(`/api/investments/${inv.id}/sign-bulletin`, {});
+      const merged = { ...inv, ...updated };
+      setInv(merged);
+      // Avancer vers le paiement uniquement après les 2 signatures
+      if ((merged as any).contratInvestorSignedAt && (merged as any).bulletinSignedAt) {
+        onNext(merged);
+      }
+    } catch (e: any) { setError(e.message); } finally { setLoading(null); }
+  }
+
+  async function signContrat() {
+    setLoading('contrat'); setError('');
+    try {
+      const updated = await api.post<Investment>(`/api/investments/${inv.id}/sign-contrat-investor`, {});
+      setInv((p) => ({ ...p, ...updated }));
+      // Ne pas avancer ici — attendre aussi la signature du bulletin
+    } catch (e: any) { setError(e.message); } finally { setLoading(null); }
+  }
+
+  function DocRow({ docType, label, signed, canSign, onSign, signing }: {
+    docType: 'bulletin' | 'contrat'; label: string; signed: boolean;
+    canSign: boolean; onSign: () => void; signing: boolean;
+  }) {
+    const [preview, setPreview] = useState(false);
+
+    return (
+      <div className={`bg-white border rounded-2xl p-4 transition-colors ${signed ? 'border-green-200 bg-green-50/30' : 'border-gray-200'}`}>
+        {preview && (
+          <PdfViewer
+            path={`/api/investments/${inv.id}/${docType}`}
+            filename={label}
+            isHtml={true}
+            hideActions={true}
+            onClose={() => setPreview(false)}
+          />
+        )}
+        <div className="flex items-center gap-3 mb-3">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${signed ? 'bg-green-100' : 'bg-blue-50'}`}>
+            <FileText className={`w-4 h-4 ${signed ? 'text-green-600' : 'text-blue-600'}`} />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-gray-900 text-sm">{label}</p>
+            <p className="text-xs text-gray-400">{formatEuros(inv.amount)}</p>
+          </div>
+          {signed && <span className="text-green-600 font-semibold text-xs bg-green-100 px-2.5 py-1 rounded-full">✓ Signé</span>}
+          <button onClick={() => setPreview(true)}
+            className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 rounded-lg px-2.5 py-1 hover:bg-blue-50 transition-colors">
+            <ZoomIn className="w-3.5 h-3.5" /> Lire
+          </button>
+        </div>
+        {!signed && (
+          <button onClick={onSign} disabled={!canSign || signing}
+            className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+              canSign
+                ? 'bg-blue-700 hover:bg-blue-800 text-white'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}>
+            {signing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {signing ? 'Signature en cours...' : canSign ? '✍️ Signer ce document' : 'Signez d\'abord le contrat ci-dessus'}
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
     <div className="max-w-lg mx-auto">
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Signature du contrat</h2>
-      <p className="text-gray-500 text-sm mb-6">
-        Votre contrat de souscription a été généré. Lisez-le attentivement avant de signer.
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Signature des documents</h2>
+      <p className="text-gray-500 text-sm mb-4">
+        Lisez chaque document attentivement puis signez-les dans l'ordre.
       </p>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>
-      )}
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>}
 
-      {/* Aperçu contrat */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-            <FileText className="w-5 h-5 text-blue-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-gray-900 text-sm">Contrat de souscription</p>
-            <p className="text-xs text-gray-400">PDF généré · {formatEuros(investment.amount)}</p>
-          </div>
-          <a
-            href={`${API_URL}/api/investments/${investment.id}/contract`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-auto flex items-center gap-1.5 text-blue-600 hover:text-blue-800 text-sm font-medium"
-          >
-            <ExternalLink className="w-4 h-4" />
-            Lire
-          </a>
-        </div>
-
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-          <strong>Mode MVP :</strong> La signature est simulée localement. En production, vous seriez redirigé vers Yousign pour signer électroniquement.
-        </div>
+      <div className="space-y-3 mb-4">
+        <DocRow
+          docType="contrat" label="Contrat d'émission d'obligations"
+          signed={contratSigned} canSign={true}
+          onSign={signContrat} signing={loading === 'contrat'}
+        />
+        <DocRow
+          docType="bulletin" label="Bulletin de souscription"
+          signed={bulletinSigned} canSign={contratSigned}
+          onSign={signBulletin} signing={loading === 'bulletin'}
+        />
       </div>
 
-      <button
-        onClick={handleSign}
-        disabled={loading}
-        className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
-      >
-        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-        {loading ? 'Signature en cours...' : '✍️ Signer le contrat'}
-      </button>
+      {contratSigned && bulletinSigned && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 text-center font-medium mb-4">
+          ✓ Les 2 documents sont signés — procédez au virement
+        </div>
+      )}
+
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-800">
+        <p className="font-semibold mb-0.5">Après votre signature</p>
+        <p>L'émetteur co-signera le contrat. Vous pouvez virer dès maintenant.</p>
+      </div>
     </div>
   );
 }
@@ -266,11 +319,31 @@ export default function InvestPage({ params }: { params: Promise<{ projectId: st
 
   const [step, setStep] = useState<Step>('amount');
   const [investment, setInvestment] = useState<Investment | null>(null);
+  const [resumeChecked, setResumeChecked] = useState(false);
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => api.get<Project>(`/api/projects/${projectId}`),
   });
+
+  // Détecter un investissement en cours pour ce projet et reprendre au bon endroit
+  const { data: myInvestments } = useQuery({
+    queryKey: ['my-investments'],
+    queryFn: () => api.get<any[]>('/api/investments/mine'),
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (resumeChecked || !myInvestments) return;
+    setResumeChecked(true);
+    const existing = myInvestments.find(
+      (i: any) => i.project?.id === projectId && ['PENDING_SIGNATURE', 'PENDING_PAYMENT'].includes(i.status)
+    );
+    if (existing) {
+      setInvestment(existing);
+      setStep(existing.status === 'PENDING_PAYMENT' ? 'payment' : 'sign');
+    }
+  }, [myInvestments, projectId, resumeChecked]);
 
   if (!user) {
     router.replace('/login');

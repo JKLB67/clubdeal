@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Shield, CreditCard, FileSignature, Eye, EyeOff } from 'lucide-react';
+import Link from 'next/link';
+import { Shield, CreditCard, FileSignature, Eye, EyeOff, Building2, ChevronRight } from 'lucide-react';
 
 function ApiKeyField({ label, placeholder }: { label: string; placeholder: string }) {
   const [visible, setVisible] = useState(false);
@@ -42,6 +43,19 @@ export default function AdminSettingsPage() {
       </div>
 
       <div className="space-y-6">
+        {/* Entité émettrice */}
+        <Link href="/admin/settings/entity"
+          className="flex items-center gap-4 bg-white border border-gray-100 rounded-2xl p-5 hover:shadow-sm hover:border-blue-200 transition-all group">
+          <div className="w-9 h-9 bg-green-50 rounded-lg flex items-center justify-center group-hover:bg-green-100 transition-colors">
+            <Building2 className="w-5 h-5 text-green-600" />
+          </div>
+          <div className="flex-1">
+            <h2 className="font-bold text-gray-900">Profil de l'émetteur</h2>
+            <p className="text-xs text-gray-500">Informations juridiques pré-remplies dans les contrats</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />
+        </Link>
+
         {/* PSP */}
         <section className="bg-white border border-gray-100 rounded-2xl p-6 space-y-5">
           <div className="flex items-center gap-3 mb-1">

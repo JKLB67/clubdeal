@@ -90,6 +90,7 @@ export class InvestmentsService {
       include: {
         project: {
           select: {
+            id: true,
             name: true,
             address: true,
             annualYield: true,

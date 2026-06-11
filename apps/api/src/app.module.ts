@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
 import { InvestmentsModule } from './investments/investments.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { TenantEntityModule } from './tenant-entity/tenant-entity.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -25,6 +26,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     ProjectsModule,
     InvestmentsModule,
     WebhooksModule,
+    TenantEntityModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -26,10 +26,15 @@ export interface Project {
   durationMonths: number;
   precommercialisationRate?: string;
   status: 'DRAFT' | 'ACTIVE' | 'FUNDED' | 'CLOSED';
+  minInvestment?: string | null;
+  openingDate?: string | null;
+  closingDate?: string | null;
   virtualIban?: string;
+  isFavorite?: boolean;
+  myAlerts?: string[];
+  _count?: { investments: number; favorites: number };
   photos: { id: string; url: string; orderIndex: number }[];
-  documents?: { id: string; name: string; url: string; type: string }[];
-  _count?: { investments: number };
+  documents?: { id: string; name: string; label?: string | null; url: string; type: string; orderIndex: number }[];
 }
 
 export interface AuthResponse {

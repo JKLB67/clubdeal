@@ -1,13 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
+import { PdfViewer } from '@/components/ui/PdfViewer';
 import { api } from '@/lib/api';
 import { formatEuros } from '@/lib/utils';
-import { FileText, ExternalLink } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import { FileText, ExternalLink, ZoomIn } from 'lucide-react';
 
 interface MyInvestment {
   id: string;
@@ -15,7 +15,10 @@ interface MyInvestment {
   status: 'PENDING_SIGNATURE' | 'PENDING_PAYMENT' | 'CONFIRMED' | 'FAILED' | 'CANCELLED';
   createdAt: string;
   confirmedAt?: string;
-  project: { name: string; address: string; annualYield: string; durationMonths: number; virtualIban?: string };
+  bulletinSignedAt?: string | null;
+  contratInvestorSignedAt?: string | null;
+  contratEmitterSignedAt?: string | null;
+  project: { id: string; name: string; address: string; annualYield: string; durationMonths: number; virtualIban?: string };
 }
 
 const STATUS_CONFIG = {
@@ -26,89 +29,148 @@ const STATUS_CONFIG = {
   CANCELLED:         { label: 'Annulé',                className: 'bg-gray-100 text-gray-500' },
 };
 
+type DocType = { invId: string; type: 'contrat' | 'bulletin'; label: string };
+
 export default function MyInvestmentsPage() {
+  const [viewDoc, setViewDoc] = useState<DocType | null>(null);
+  const [showIban, setShowIban] = useState<Record<string, boolean>>({});
+
   const { data: investments = [], isLoading } = useQuery({
     queryKey: ['my-investments'],
     queryFn: () => api.get<MyInvestment[]>('/api/investments/mine'),
-    refetchInterval: 10_000, // rafraîchissement auto toutes les 10s
+    refetchInterval: 10_000,
   });
+
+  // Exclure les investissements annulés
+  const active = investments.filter((i) => i.status !== 'CANCELLED');
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <Navbar />
-      <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-10">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Mes investissements</h1>
-        <p className="text-gray-500 mb-8">Suivez l'état de vos souscriptions en temps réel.</p>
+      <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
+        <h1 className="text-xl font-bold text-gray-900 mb-1">Mes investissements</h1>
+        <p className="text-gray-500 text-sm mb-6">Suivez l'état de vos souscriptions en temps réel.</p>
+
+        {viewDoc && (
+          <PdfViewer
+            path={`/api/investments/${viewDoc.invId}/${viewDoc.type}`}
+            filename={viewDoc.label}
+            isHtml={true}
+            onClose={() => setViewDoc(null)}
+          />
+        )}
 
         {isLoading ? (
           <div className="space-y-3">
-            {[1, 2].map((i) => <div key={i} className="bg-white rounded-2xl h-28 animate-pulse border border-gray-100" />)}
+            {[1, 2].map((i) => <div key={i} className="bg-white rounded-xl h-24 animate-pulse border border-gray-100" />)}
           </div>
-        ) : investments.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border border-gray-100">
-            <p className="text-4xl mb-3">📋</p>
+        ) : active.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
+            <p className="text-3xl mb-3">📋</p>
             <p className="text-gray-500 mb-4">Aucun investissement pour le moment</p>
             <Link href="/" className="text-blue-700 font-medium hover:underline text-sm">
               Découvrir les projets →
             </Link>
           </div>
         ) : (
-          <div className="space-y-4">
-            {investments.map((inv) => {
+          <div className="space-y-3">
+            {active.map((inv) => {
               const cfg = STATUS_CONFIG[inv.status] ?? STATUS_CONFIG.PENDING_SIGNATURE;
+              const bothSigned = !!(inv.contratInvestorSignedAt && inv.bulletinSignedAt);
               return (
-                <div key={inv.id} className="bg-white border border-gray-100 rounded-2xl p-6">
-                  <div className="flex items-start justify-between mb-4">
+                <div key={inv.id} className="bg-white border border-gray-100 rounded-xl p-4">
+                  <div className="flex items-start justify-between mb-3">
                     <div>
                       <p className="font-bold text-gray-900">{inv.project.name}</p>
-                      <p className="text-sm text-gray-400 mt-0.5">{inv.project.address}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{inv.project.address}</p>
                     </div>
-                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${cfg.className}`}>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cfg.className}`}>
                       {cfg.label}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4 text-sm mb-4">
+                  <div className="grid grid-cols-3 gap-3 text-sm mb-3">
                     <div>
                       <p className="text-gray-400 text-xs">Montant investi</p>
-                      <p className="font-bold text-gray-900 mt-0.5">{formatEuros(inv.amount)}</p>
+                      <p className="font-bold text-gray-900">{formatEuros(inv.amount)}</p>
                     </div>
                     <div>
                       <p className="text-gray-400 text-xs">Rendement</p>
-                      <p className="font-semibold text-green-700 mt-0.5">{inv.project.annualYield}% /an</p>
+                      <p className="font-semibold text-green-700">{inv.project.annualYield}% /an</p>
                     </div>
                     <div>
                       <p className="text-gray-400 text-xs">Durée</p>
-                      <p className="font-semibold text-gray-900 mt-0.5">{inv.project.durationMonths} mois</p>
+                      <p className="font-semibold text-gray-900">{inv.project.durationMonths} mois</p>
                     </div>
                   </div>
 
-                  {/* Actions contextuelles */}
-                  <div className="flex items-center gap-3 pt-3 border-t border-gray-100">
-                    <a
-                      href={`${API_URL}/api/investments/${inv.id}/contract`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      <FileText className="w-4 h-4" />
-                      Voir le contrat
-                    </a>
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
+                    {/* Voir le contrat */}
+                    {inv.contratInvestorSignedAt && (
+                      <button
+                        onClick={() => setViewDoc({ invId: inv.id, type: 'contrat', label: "Contrat d'émission" })}
+                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                        Voir le contrat
+                      </button>
+                    )}
 
+                    {/* Voir le bulletin */}
+                    {inv.bulletinSignedAt && (
+                      <button
+                        onClick={() => setViewDoc({ invId: inv.id, type: 'bulletin', label: 'Bulletin de souscription' })}
+                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Voir le bulletin
+                      </button>
+                    )}
+
+                    {/* Finaliser la signature — lien vers la page projet */}
                     {inv.status === 'PENDING_SIGNATURE' && (
                       <Link
-                        href={`/invest/${inv.id}`}
-                        className="flex items-center gap-1.5 text-sm text-amber-600 hover:text-amber-800 font-medium"
+                        href={`/invest/${inv.project.id}`}
+                        className="flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-900 font-medium border border-amber-200 rounded-lg px-2.5 py-1.5 hover:bg-amber-50 transition-colors"
                       >
-                        <ExternalLink className="w-4 h-4" />
+                        <ExternalLink className="w-3.5 h-3.5" />
                         Finaliser la signature
                       </Link>
                     )}
 
+                    {/* IBAN — visible uniquement quand les 2 documents sont signés */}
                     {inv.status === 'PENDING_PAYMENT' && (
-                      <div className="text-xs text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg">
-                        Virement attendu sur IBAN :{' '}
-                        <code className="font-mono">{inv.project.virtualIban ?? 'En attente de configuration'}</code>
+                      <div className="flex items-center gap-2">
+                        {bothSigned ? (
+                          <>
+                            {showIban[inv.id] ? (
+                              <div className="text-xs text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                IBAN :{' '}
+                                <code className="font-mono">{inv.project.virtualIban ?? '—'}</code>
+                                <button
+                                  onClick={() => setShowIban((s) => ({ ...s, [inv.id]: false }))}
+                                  className="text-blue-400 hover:text-blue-700 ml-1"
+                                >✕</button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShowIban((s) => ({ ...s, [inv.id]: true }))}
+                                className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900 font-medium border border-blue-300 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
+                              >
+                                Voir l'IBAN
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            disabled
+                            title="Signez les 2 documents pour accéder à l'IBAN"
+                            className="flex items-center gap-1.5 text-xs text-gray-400 font-medium border border-gray-200 rounded-lg px-2.5 py-1.5 cursor-not-allowed"
+                          >
+                            🔒 Voir l'IBAN (signature requise)
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

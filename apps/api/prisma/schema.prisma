@@ -62,6 +62,7 @@ model User {
   profileType  ProfileType @default(PHYSICAL)
   statusKyc    KycStatus   @default(NOT_INITIATED)
   isPep        Boolean     @default(false)
+  isSuspended  Boolean     @default(false)
   pspUserId    String?
 
   createdAt    DateTime    @default(now())
@@ -70,6 +71,8 @@ model User {
   physicalProfile UserPhysicalProfile?
   legalProfile    UserLegalProfile?
   investments     Investment[]
+  favorites       ProjectFavorite[]
+  alerts          ProjectAlert[]
 
   @@unique([tenantId, email])
 }
@@ -139,15 +142,22 @@ model Project {
   precommercialisationRate Decimal?      @db.Decimal(5, 2)
   status                   ProjectStatus @default(DRAFT)
 
+  minInvestment            BigInt?
+  openingDate              DateTime?
+  closingDate              DateTime?
+
   pspWalletId              String?
   virtualIban              String?
 
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
-  photos      ProjectPhoto[]
-  documents   ProjectDocument[]
-  investments Investment[]
+  photos         ProjectPhoto[]
+  documents      ProjectDocument[]
+  investments    Investment[]
+  favorites      ProjectFavorite[]
+  alerts         ProjectAlert[]
+  contractConfig ContractConfig?
 }
 
 model ProjectPhoto {
@@ -160,13 +170,43 @@ model ProjectPhoto {
 }
 
 model ProjectDocument {
-  id        String              @id @default(uuid())
+  id         String              @id @default(uuid())
+  projectId  String
+  project    Project             @relation(fields: [projectId], references: [id])
+  name       String
+  label      String?
+  url        String
+  type       ProjectDocumentType @default(OTHER)
+  orderIndex Int                 @default(0)
+  createdAt  DateTime            @default(now())
+}
+
+model ProjectFavorite {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
   projectId String
-  project   Project             @relation(fields: [projectId], references: [id])
-  name      String
-  url       String
-  type      ProjectDocumentType @default(OTHER)
-  createdAt DateTime            @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projectId])
+}
+
+model ProjectAlert {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id])
+  type      AlertType
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, projectId, type])
+}
+
+enum AlertType {
+  DOCUMENT_CHANGE
+  COLLECTION_START
 }
 
 // ─────────────────────────────────────────────
@@ -209,11 +249,58 @@ model Investment {
   esignRequestId    String?
   esignSignedAt     DateTime?
 
+  bulletinSignedAt        DateTime?
+  contratInvestorSignedAt DateTime?
+  contratEmitterSignedAt  DateTime?
+
   pspTransactionId  String?
   confirmedAt       DateTime?
 
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// ENTITÉ ÉMETTRICE (profil société du tenant)
+// ─────────────────────────────────────────────
+
+model TenantEntity {
+  id                  String   @id @default(uuid())
+  tenantId            String   @unique
+  name                String   @default("")
+  legalForm           String   @default("SAS")
+  capital             Int      @default(1000)
+  address             String   @default("")
+  rcsCity             String   @default("")
+  rcsNumber           String   @default("")
+  representative      String   @default("")
+  representativeTitle String   @default("Directeur Général")
+  email               String?
+  signatureCity       String   @default("Strasbourg")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// CONFIGURATION DES CONTRATS PAR PROJET
+// ─────────────────────────────────────────────
+
+model ContractConfig {
+  id                        String   @id @default(uuid())
+  projectId                 String   @unique
+  project                   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  priorityRank              Int      @default(1)
+  minGuaranteedRate         Decimal  @default(6)  @db.Decimal(5, 2)
+  guaranteedPeriodMonths    Int      @default(3)
+  monthlyComplementaryRate  Decimal  @default(2)  @db.Decimal(5, 2)
+  contractualCapRate        Decimal  @default(22) @db.Decimal(5, 2)
+  propertyDescription       String?
+  massRepresentative        String   @default("")
+  competentCourt            String   @default("Strasbourg")
+  earlyRepaymentNoticeDays  Int      @default(7)
+  latePaymentPenaltyPoints  Int      @default(5)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────
