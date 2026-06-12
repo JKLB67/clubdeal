@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { generateAndStorePdf, htmlToPdfFlattened, htmlToSecureViewerHtml } from './pdf-flatten.util';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PDFDocument = require('pdfkit') as any;
 
 // ─── French number-to-words ───────────────────────────────────────────────────
 
@@ -54,38 +57,12 @@ function ordinalRank(n: number): string {
 
 // ─── HTML base styles ────────────────────────────────────────────────────────
 
-function buildWatermark(text: string): string {
-  const safe = text.replace(/</g, '&lt;').replace(/"/g, '&quot;');
-  const svgRow = encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='500' height='500'>` +
-    `<text x='250' y='250' fill='rgba(0,0,0,0.055)' font-size='34' font-weight='bold' ` +
-    `font-family='Arial,sans-serif' text-anchor='middle' dominant-baseline='middle' ` +
-    `transform='rotate(-42,250,250)'>${safe}</text></svg>`,
-  );
-  return `url("data:image/svg+xml,${svgRow}")`;
-}
-
-function buildStyle(watermarkText: string, isSigned: boolean): string {
-  // Watermark: toujours présent — "BROUILLON" avant signature, "CONFIDENTIEL" après
-  const wmLabel = isSigned ? 'CONFIDENTIEL' : watermarkText;
-  const wm = buildWatermark(wmLabel);
-  const bgRule = 'background-image:' + wm + ';background-size:500px 500px;';
-  // Protection copie : toujours active, signé ou non
-  const antiCopyScript = [
-    '<script>',
-    "document.addEventListener('contextmenu',function(e){e.preventDefault();});",
-    "document.addEventListener('keydown',function(e){",
-    "  if((e.ctrlKey||e.metaKey)&&['c','a','s','p','u'].indexOf(e.key.toLowerCase())>-1)e.preventDefault();",
-    "});",
-    "document.addEventListener('dragstart',function(e){e.preventDefault();});",
-    '</script>',
-  ].join('\n');
-
+function buildStyle(): string {
   return [
     '<style>',
-    '  *{box-sizing:border-box;margin:0;padding:0;-webkit-user-select:none;user-select:none;}',
+    '  *{box-sizing:border-box;margin:0;padding:0;}',
     "  body{font-family:'Times New Roman',Times,serif;font-size:var(--fs,11pt);line-height:1.6;",
-    '       color:#000;background:#fff;padding:40px 60px;max-width:800px;margin:0 auto;' + bgRule + '}',
+    '       color:#000;background:#fff;padding:40px 60px;max-width:800px;margin:0 auto;}',
     '  h1{font-size:14pt;text-align:center;text-transform:uppercase;font-weight:bold;margin-bottom:24px;}',
     '  h2{font-size:11pt;font-weight:bold;margin:20px 0 8px;text-transform:uppercase;}',
     '  h3{font-size:11pt;font-weight:bold;margin:14px 0 6px;}',
@@ -108,7 +85,6 @@ function buildStyle(watermarkText: string, isSigned: boolean): string {
     '  ol li{margin:4px 0;}',
     '  @media print{body{padding:20px 40px;}.no-print{display:none;}}',
     '</style>',
-    antiCopyScript,
   ].join('\n');
 }
 
@@ -122,6 +98,149 @@ export class ContractService {
   ) {}
 
   // ── Fetch all data needed to generate both docs ───────────────────────────
+
+  // ── PDF pur Node.js (sans Chrome) ────────────────────────────────────────
+
+  private pdfBuffer(fn: (doc: any) => void): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: 'Document confidentiel' } });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      try { fn(doc); doc.end(); } catch (e) { reject(e); }
+    });
+  }
+
+  private pdfHeader(doc: any, title: string, _watermark?: string) {
+    const W = doc.page.width;
+    // Header bar
+    doc.rect(50, 40, W - 100, 2).fill('#1e3a5f');
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1e3a5f').text(title, 50, 52, { width: W - 100, align: 'center' });
+    doc.rect(50, 78, W - 100, 1).fill('#e5e7eb');
+    doc.moveDown(2);
+  }
+
+  private pdfSection(doc: any, title: string) {
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a5f').text(title.toUpperCase());
+    doc.rect(doc.x, doc.y, doc.page.width - 100, 1).fill('#1e3a5f');
+    doc.fillColor('#111').moveDown(0.4);
+  }
+
+  private pdfField(doc: any, label: string, value: string) {
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#374151').text(label + ' : ', { continued: true });
+    doc.font('Helvetica').fillColor('#111').text(value || '—');
+  }
+
+  private pdfParagraph(doc: any, text: string) {
+    doc.fontSize(9).font('Helvetica').fillColor('#111').text(text, { align: 'justify', lineGap: 2 });
+    doc.moveDown(0.4);
+  }
+
+  private pdfSignatureBlock(doc: any, signataire: string, date: string | null, label: string) {
+    doc.moveDown(0.5);
+    doc.fontSize(9).font('Helvetica-Bold').text(label);
+    if (date) {
+      doc.font('Helvetica').text('Signé le ' + date);
+      doc.fontSize(8).fillColor('#16a34a').text('✓ Signature électronique enregistrée');
+    } else {
+      doc.font('Helvetica').fillColor('#9ca3af').text('En attente de signature');
+    }
+    doc.fillColor('#111');
+    doc.rect(doc.x, doc.y + 6, 180, 30).stroke('#d1d5db');
+    doc.fontSize(8).fillColor('#6b7280').text(signataire, doc.x + 6, doc.y + 10);
+    doc.fillColor('#111').moveDown(3);
+  }
+
+  async generateBulletinPdf(investmentId: string): Promise<Buffer> {
+    const { inv, entity } = await this.getInvestmentData(investmentId);
+    const obligataire = this.buildObligataire(inv);
+    const emitter = this.buildEmitter(entity);
+    const amountEuros = Number(inv.amount) / 100;
+    const isSigned = !!(inv.bulletinSignedAt && inv.contratInvestorSignedAt);
+    const date = new Date().toLocaleDateString('fr-FR');
+
+    return this.pdfBuffer((doc) => {
+      this.pdfHeader(doc, 'BULLETIN DE SOUSCRIPTION');
+
+      this.pdfSection(doc, 'Identification de l\'obligataire');
+      if (obligataire.isLegal) {
+        this.pdfField(doc, 'Raison sociale', obligataire.name);
+        this.pdfField(doc, 'Forme juridique', obligataire.legalForm ?? '');
+        this.pdfField(doc, 'Adresse du siège', obligataire.address);
+        this.pdfField(doc, 'SIREN', obligataire.rcsNumber ?? '');
+      } else {
+        this.pdfField(doc, 'Nom complet', obligataire.name);
+        this.pdfField(doc, 'Adresse', obligataire.address);
+      }
+
+      this.pdfSection(doc, 'Détails de la souscription');
+      this.pdfField(doc, 'Projet', inv.project.name);
+      this.pdfField(doc, 'Montant souscrit', amountEuros.toLocaleString('fr-FR') + ' €');
+      this.pdfField(doc, 'Nombre d\'obligations', amountEuros.toLocaleString('fr-FR'));
+      this.pdfField(doc, 'Valeur nominale unitaire', '1 €');
+      this.pdfField(doc, 'Date de souscription', date);
+      this.pdfField(doc, 'Référence', inv.id);
+
+      this.pdfSection(doc, 'Émetteur');
+      this.pdfField(doc, 'Société', emitter.name);
+      this.pdfField(doc, 'Forme juridique', emitter.legalForm);
+      this.pdfField(doc, 'Siège social', emitter.address);
+      this.pdfField(doc, 'Représentant', emitter.representative + ' (' + emitter.representativeTitle + ')');
+
+      this.pdfSection(doc, 'Engagement');
+      this.pdfParagraph(doc,
+        `Le soussigné déclare souscrire ${amountEuros.toLocaleString('fr-FR')} obligation(s) d'une valeur nominale de un euro (1 €) chacune, émise(s) par ${emitter.name}, pour un montant total de ${amountEuros.toLocaleString('fr-FR')} € (${euroInWords(amountEuros)}), et s'engage à en libérer intégralement le montant dans les conditions prévues au contrat d'émission.`
+      );
+
+      doc.addPage();
+      this.pdfHeader(doc, 'BULLETIN DE SOUSCRIPTION — SIGNATURES');
+      this.pdfSignatureBlock(doc, obligataire.name, inv.contratInvestorSignedAt?.toLocaleDateString('fr-FR') ?? null, 'Signature de l\'obligataire');
+      this.pdfSignatureBlock(doc, emitter.name, inv.contratEmitterSignedAt?.toLocaleDateString('fr-FR') ?? null, 'Signature de l\'émetteur (' + emitter.representative + ')');
+    });
+  }
+
+  async generateContratPdf(investmentId: string): Promise<Buffer> {
+    const { inv, entity } = await this.getInvestmentData(investmentId);
+    const obligataire = this.buildObligataire(inv);
+    const emitter = this.buildEmitter(entity);
+    const config = this.buildConfig(inv.project);
+    const amountEuros = Number(inv.amount) / 100;
+    const isSigned = !!(inv.bulletinSignedAt && inv.contratInvestorSignedAt);
+
+    return this.pdfBuffer((doc) => {
+      this.pdfHeader(doc, 'CONTRAT D\'ÉMISSION D\'OBLIGATIONS');
+
+      this.pdfSection(doc, 'Parties au contrat');
+      this.pdfField(doc, 'Émetteur', emitter.name + ' — ' + emitter.legalForm + ' — ' + emitter.address);
+      this.pdfField(doc, 'Obligataire', obligataire.name + (obligataire.address ? ' — ' + obligataire.address : ''));
+
+      this.pdfSection(doc, 'Objet et caractéristiques');
+      this.pdfField(doc, 'Projet', inv.project.name);
+      this.pdfField(doc, 'Description du bien', config.propertyDescription);
+      this.pdfField(doc, 'Montant de l\'emprunt obligataire', amountEuros.toLocaleString('fr-FR') + ' € (' + euroInWords(amountEuros) + ')');
+      this.pdfField(doc, 'Durée maximale', config.durationMonths + ' mois');
+      this.pdfField(doc, 'Taux garanti minimum', config.minGuaranteedRate + ' % /an');
+      this.pdfField(doc, 'Taux plafond contractuel', config.contractualCapRate + ' % /an');
+      this.pdfField(doc, 'Période garantie', config.guaranteedPeriodMonths + ' mois');
+      this.pdfField(doc, 'Rang de priorité', String(config.priorityRank));
+      this.pdfField(doc, 'Pénalité de retard', '+' + config.latePaymentPenaltyPoints + ' points');
+      this.pdfField(doc, 'Préavis remboursement anticipé', config.earlyRepaymentNoticeDays + ' jours');
+      this.pdfField(doc, 'Tribunal compétent', config.competentCourt);
+      this.pdfField(doc, 'Référence', inv.id);
+
+      this.pdfSection(doc, 'Conditions générales');
+      this.pdfParagraph(doc, `L'émetteur s'engage à rembourser le capital et à verser les intérêts selon les termes définis. Le taux garanti minimum de ${config.minGuaranteedRate}% par an est applicable sur la période garantie de ${config.guaranteedPeriodMonths} mois. Au-delà, un taux complémentaire de ${config.monthlyComplementaryRate}% par mois peut s'appliquer dans la limite du taux plafond de ${config.contractualCapRate}% par an.`);
+      this.pdfParagraph(doc, `En cas de remboursement anticipé, l'émetteur s'engage à en informer l'obligataire avec un préavis de ${config.earlyRepaymentNoticeDays} jours. Tout retard de paiement entraîne une pénalité de ${config.latePaymentPenaltyPoints} points supplémentaires.`);
+      this.pdfParagraph(doc, `Le présent contrat est soumis au droit français. Tout litige sera soumis à la compétence exclusive du Tribunal de ${config.competentCourt}.`);
+
+      doc.addPage();
+      this.pdfHeader(doc, 'CONTRAT D\'ÉMISSION — SIGNATURES');
+      this.pdfSignatureBlock(doc, obligataire.name, inv.contratInvestorSignedAt?.toLocaleDateString('fr-FR') ?? null, 'Signature de l\'obligataire');
+      this.pdfSignatureBlock(doc, emitter.representative + ' (' + emitter.name + ')', inv.contratEmitterSignedAt?.toLocaleDateString('fr-FR') ?? null, 'Signature de l\'émetteur');
+    });
+  }
 
   async getInvestmentData(investmentId: string) {
     const inv = await this.prisma.investment.findUnique({
@@ -216,12 +335,11 @@ export class ContractService {
     const emitter = this.buildEmitter(entity);
     const obligataire = this.buildObligataire(inv);
     const amountEuros = Number(inv.amount) / 100;
-    const signDate = inv.bulletinSignedAt
-      ? inv.bulletinSignedAt.toLocaleDateString('fr-FR')
-      : new Date().toLocaleDateString('fr-FR');
     const isSigned = !!inv.bulletinSignedAt;
-    const watermarkText = `${emitter.name} – BROUILLON`;
-    const style = buildStyle(watermarkText, isSigned);
+    const signDate = isSigned
+      ? inv.bulletinSignedAt!.toLocaleDateString('fr-FR')
+      : new Date().toLocaleDateString('fr-FR');
+    const style = buildStyle();
 
     const obligataireDesc = obligataire.isLegal
       ? `<strong>${obligataire.name},</strong> société ${obligataire.legalForm} au capital social de ${obligataire.capitalStr}, dont le siège social est situé au ${obligataire.address}${obligataire.rcsCity ? `, immatriculée au RCS de ${obligataire.rcsCity} sous le numéro ${obligataire.rcsNumber}` : ''}, représentée par ${obligataire.representative} en qualité de ${obligataire.representativeTitle} déclarant avoir tous pouvoirs à l'effet des présentes.`
@@ -290,8 +408,7 @@ export class ContractService {
     const emitterSignDate = inv.contratEmitterSignedAt?.toLocaleDateString('fr-FR') ?? signDate;
 
     const isFullySigned = isInvestorSigned && isEmitterSigned;
-    const watermarkText = `${emitter.name} – BROUILLON`;
-    const style = buildStyle(watermarkText, isFullySigned);
+    const style = buildStyle();
     const rankLabel = `Rang ${ordinalRank(config.priorityRank)}`;
 
     const obligataireBlock = obligataire.isLegal
@@ -519,6 +636,34 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
 
   // Ordre de signature : 1) contrat investor → 2) bulletin → PENDING_PAYMENT + notif admin
 
+  private async getWatermarkName(investmentId: string): Promise<string> {
+    const inv = await this.prisma.investment.findUnique({ where: { id: investmentId } });
+    const entity = inv ? await this.prisma.tenantEntity.findUnique({ where: { tenantId: inv.tenantId } }) : null;
+    return entity?.name ?? 'Document';
+  }
+
+  /** Pour la prévisualisation : HTML sécurisé (images non copiables, pas de PDF viewer Chrome). */
+  async flattenBulletinHtml(investmentId: string): Promise<string> {
+    const html = await this.generateBulletin(investmentId);
+    return htmlToSecureViewerHtml(html, await this.getWatermarkName(investmentId));
+  }
+
+  async flattenContratHtml(investmentId: string): Promise<string> {
+    const html = await this.generateContrat(investmentId);
+    return htmlToSecureViewerHtml(html, await this.getWatermarkName(investmentId));
+  }
+
+  /** Pour le téléchargement : PDF image (sans couche texte). */
+  async flattenBulletin(investmentId: string): Promise<Buffer> {
+    const html = await this.generateBulletin(investmentId);
+    return htmlToPdfFlattened(html, await this.getWatermarkName(investmentId));
+  }
+
+  async flattenContrat(investmentId: string): Promise<Buffer> {
+    const html = await this.generateContrat(investmentId);
+    return htmlToPdfFlattened(html, await this.getWatermarkName(investmentId));
+  }
+
   async signContratInvestor(userId: string, investmentId: string) {
     const inv = await this.prisma.investment.findFirst({
       where: { id: investmentId, userId },
@@ -550,11 +695,16 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
       },
     });
 
+    // Générer et stocker le PDF du bulletin signé
+    const entity = await this.prisma.tenantEntity.findUnique({ where: { tenantId: inv.tenantId } });
+    const emitterName = entity?.name ?? 'Document';
+    const bulletinHtml = await this.generateBulletin(investmentId);
+    generateAndStorePdf(bulletinHtml, emitterName, `bulletin-${investmentId}.pdf`).catch(() => {/* non-bloquant */});
+
     // Notify admin to co-sign the contrat
     const adminUsers = await this.prisma.user.findMany({
       where: { tenantId: inv.tenantId, role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
     });
-    const entity = await this.prisma.tenantEntity.findUnique({ where: { tenantId: inv.tenantId } });
     for (const admin of adminUsers) {
       await this.email.send(
         admin.email,
@@ -582,6 +732,12 @@ Un intérêt forfaitaire irréductible égal à <strong>${toFrenchWords(config.m
       where: { id: investmentId },
       data: { contratEmitterSignedAt: new Date(), status: 'PENDING_PAYMENT' },
     });
+
+    // Générer et stocker le PDF du contrat entièrement signé
+    const contratEntity = await this.prisma.tenantEntity.findUnique({ where: { tenantId: adminTenantId } });
+    const contratEmitterName = contratEntity?.name ?? 'Document';
+    const contratHtml = await this.generateContrat(investmentId);
+    generateAndStorePdf(contratHtml, contratEmitterName, `contrat-${investmentId}.pdf`).catch(() => {/* non-bloquant */});
 
     // Notify investor
     await this.email.send(
