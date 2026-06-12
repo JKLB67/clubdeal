@@ -18,8 +18,9 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
-      router.push('/');
+      const me = await login(email, password);
+      const isAdmin = me.role === 'ADMIN' || me.role === 'SUPER_ADMIN';
+      router.push(isAdmin ? '/admin' : '/');
     } catch (err: any) {
       setError(err.message ?? 'Identifiants incorrects');
     } finally {

@@ -268,7 +268,7 @@ export function ProjectForm({ project }: ProjectFormProps) {
                   : 'border-gray-200 text-gray-600 hover:border-gray-300'
               }`}
             >
-              {s === 'DRAFT' ? 'Brouillon' : s === 'ACTIVE' ? 'Actif' : s === 'FUNDED' ? 'Financé' : 'Clôturé'}
+              {s === 'DRAFT' ? 'Brouillon' : s === 'ACTIVE' ? 'En collecte' : s === 'FUNDED' ? 'Financé' : 'Clôturé'}
             </button>
           ))}
         </div>

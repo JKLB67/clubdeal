@@ -5,8 +5,10 @@ import { api } from '@/lib/api';
 import { X, Loader2, AlertCircle, ZoomIn, ZoomOut, Printer, Loader } from 'lucide-react';
 
 interface PdfViewerProps {
-  /** API path (e.g. /api/projects/:id/documents/:docId/download) */
+  /** API path pour le viewer (peut retourner HTML ou PDF) */
   path: string;
+  /** Chemin séparé pour télécharger le PDF binaire. Utilise path par défaut. */
+  downloadPath?: string;
   filename?: string;
   /** true = HTML contract with font-size controls, false = binary PDF */
   isHtml?: boolean;
@@ -18,7 +20,7 @@ interface PdfViewerProps {
 const FONT_STEPS = [9, 10, 11, 12, 13, 14, 16, 18];
 const DEFAULT_STEP = 2; // index → 11pt
 
-export function PdfViewer({ path, filename = 'document', isHtml = false, hideActions = false, onClose }: PdfViewerProps) {
+export function PdfViewer({ path, downloadPath, filename = 'document', isHtml = false, hideActions = false, onClose }: PdfViewerProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -27,12 +29,20 @@ export function PdfViewer({ path, filename = 'document', isHtml = false, hideAct
   const [flattening, setFlattening] = useState(false);
 
   useEffect(() => {
-    let url: string;
+    let active = true;
+    let objUrl: string;
     api.blobUrl(path)
-      .then((u) => { url = u; setBlobUrl(u); })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-    return () => { if (url) URL.revokeObjectURL(url); };
+      .then((u) => {
+        if (!active) { URL.revokeObjectURL(u); return; }
+        objUrl = u;
+        setBlobUrl(u);
+      })
+      .catch((e) => { if (active) setError(e.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => {
+      active = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
   }, [path]);
 
   // Apply font size to HTML content iframe
@@ -56,12 +66,8 @@ export function PdfViewer({ path, filename = 'document', isHtml = false, hideAct
   async function handleFlattenDownload() {
     setFlattening(true);
     try {
-      // HTML contracts: /api/investments/:id/bulletin → /api/investments/:id/bulletin/flatten
-      // Binary PDFs:    /api/projects/:id/documents/:docId/download → .../flatten
-      const flattenPath = isHtml
-        ? `${path}/flatten`
-        : path.replace(/\/download$/, '/flatten');
-      await api.download(flattenPath, `${filename.replace(/\.pdf$/i, '')}-confidentiel.pdf`);
+      const target = downloadPath ?? (isHtml ? `${path}/flatten` : path);
+      await api.download(target, `${filename.replace(/\.pdf$/i, '')}.pdf`);
     } catch (e: any) {
       alert(`Erreur : ${e.message}`);
     } finally {

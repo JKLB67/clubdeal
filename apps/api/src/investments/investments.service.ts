@@ -161,6 +161,15 @@ export class InvestmentsService {
     return updatedInv;
   }
 
+  async deleteInvestment(tenantId: string, investmentId: string) {
+    const inv = await this.prisma.investment.findFirst({
+      where: { id: investmentId, tenantId },
+    });
+    if (!inv) throw new NotFoundException('Investissement introuvable');
+    await this.prisma.investment.delete({ where: { id: investmentId } });
+    return { deleted: true };
+  }
+
   // Pour le MVP : simulation de signature sans vrai prestataire
   async simulateSign(userId: string, investmentId: string) {
     const inv = await this.prisma.investment.findFirst({

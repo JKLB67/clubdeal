@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Res, UseGuards, InternalServerErrorException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import * as fs from 'fs';
@@ -12,61 +12,6 @@ import { Roles } from '../common/guards/roles.guard';
 import { Public } from '../common/decorators/public.decorator';
 
 interface AuthUser { id: string; tenantId: string; role: string }
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { createCanvas } = require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { PDFDocument } = require('pdf-lib') as typeof import('pdf-lib');
-
-/**
- * Rend un HTML en PDF via Puppeteer, puis aplatit chaque page en image PNG
- * pour produire un PDF incopiable.
- */
-async function htmlToPdfFlattened(html: string): Promise<Buffer> {
-  // Import dynamique pour éviter les problèmes de module
-  const puppeteer = await import('puppeteer');
-  const browser = await puppeteer.default.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-    });
-    await browser.close();
-
-    // Aplatir : rendre chaque page en image PNG via pdfjs + canvas
-    const pdfjsLib = await (Function('return import("pdfjs-dist/legacy/build/pdf.mjs")')() as Promise<any>);
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer), disableWorker: true });
-    const pdfDoc = await loadingTask.promise;
-    const outDoc = await PDFDocument.create();
-
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      const pdfPage = await pdfDoc.getPage(i);
-      const viewport = pdfPage.getViewport({ scale: 2.0 });
-      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await pdfPage.render({ canvasContext: ctx as any, viewport }).promise;
-      const png = canvas.toBuffer('image/png');
-      const img = await outDoc.embedPng(png);
-      const outPage = outDoc.addPage([viewport.width, viewport.height]);
-      outPage.drawImage(img, { x: 0, y: 0, width: viewport.width, height: viewport.height });
-    }
-
-    return Buffer.from(await outDoc.save());
-  } catch (err) {
-    await browser.close().catch(() => {});
-    throw err;
-  }
-}
 
 @ApiTags('Investments')
 @ApiBearerAuth()
@@ -125,26 +70,60 @@ export class InvestmentsController {
     res.send(html);
   }
 
-  // ── Flatten HTML contract → image-based PDF (non copiable) ──────────────────
+  // ── PDF aplati à la volée (prévisualisation avant signature) ────────────────
 
   @Get(':id/bulletin/flatten')
-  @ApiOperation({ summary: 'Bulletin aplati non copiable (PDF images)' })
+  @ApiOperation({ summary: 'Bulletin en HTML sécurisé (prévisualisation, images non copiables)' })
   async flattenBulletin(@Param('id') id: string, @Res() res: Response) {
-    const html = await this.contractService.generateBulletin(id);
-    const pdfBytes = await htmlToPdfFlattened(html);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="bulletin-confidentiel.pdf"`);
-    res.end(pdfBytes);
+    const html = await this.contractService.flattenBulletinHtml(id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   }
 
   @Get(':id/contrat/flatten')
-  @ApiOperation({ summary: 'Contrat aplati non copiable (PDF images)' })
+  @ApiOperation({ summary: 'Contrat en HTML sécurisé (prévisualisation, images non copiables)' })
   async flattenContrat(@Param('id') id: string, @Res() res: Response) {
-    const html = await this.contractService.generateContrat(id);
-    const pdfBytes = await htmlToPdfFlattened(html);
+    const html = await this.contractService.flattenContratHtml(id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  }
+
+  // ── Téléchargement PDF binaire (pour le bouton "Télécharger") ────────────
+
+  @Get(':id/bulletin/download')
+  @ApiOperation({ summary: 'Bulletin PDF binaire pour téléchargement' })
+  async downloadBulletinPdf(@Param('id') id: string, @Res() res: Response) {
+    const buf = await this.contractService.flattenBulletin(id);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="contrat-confidentiel.pdf"`);
-    res.end(pdfBytes);
+    res.setHeader('Content-Disposition', `attachment; filename="bulletin-${id}.pdf"`);
+    res.end(buf);
+  }
+
+  @Get(':id/contrat/download')
+  @ApiOperation({ summary: 'Contrat PDF binaire pour téléchargement' })
+  async downloadContratPdf(@Param('id') id: string, @Res() res: Response) {
+    const buf = await this.contractService.flattenContrat(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="contrat-${id}.pdf"`);
+    res.end(buf);
+  }
+
+  // ── Viewer HTML sécurisé (prévisualisation, stocké lors de la signature) ──
+
+  @Get(':id/bulletin/pdf')
+  @ApiOperation({ summary: 'Bulletin sécurisé (viewer HTML, non copiable)' })
+  async getBulletinPdf(@Param('id') id: string, @Res() res: Response) {
+    const html = await this.contractService.flattenBulletinHtml(id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  }
+
+  @Get(':id/contrat/pdf')
+  @ApiOperation({ summary: 'Contrat sécurisé (viewer HTML, non copiable)' })
+  async getContratPdf(@Param('id') id: string, @Res() res: Response) {
+    const html = await this.contractService.flattenContratHtml(id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   }
 
   // ── Signature actions ─────────────────────────────────────────────────────
@@ -173,6 +152,13 @@ export class InvestmentsController {
   @ApiOperation({ summary: '[Admin] Refuse la signature avec motif' })
   rejectInvestment(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { reason: string }) {
     return this.contractService.rejectInvestment(user.tenantId, id, body.reason);
+  }
+
+  @Delete(':id')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: '[Admin] Supprime un investissement' })
+  deleteInvestment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.investmentsService.deleteInvestment(user.tenantId, id);
   }
 
   // ── Legacy sign simulation ────────────────────────────────────────────────

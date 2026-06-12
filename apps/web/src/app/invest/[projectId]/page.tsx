@@ -172,9 +172,9 @@ function StepSign({
       <div className={`bg-white border rounded-2xl p-4 transition-colors ${signed ? 'border-green-200 bg-green-50/30' : 'border-gray-200'}`}>
         {preview && (
           <PdfViewer
-            path={`/api/investments/${inv.id}/${docType}`}
+            path={`/api/investments/${inv.id}/${docType}/flatten`}
             filename={label}
-            isHtml={true}
+            isHtml={false}
             hideActions={true}
             onClose={() => setPreview(false)}
           />
@@ -415,10 +415,11 @@ export default function InvestPage({ params }: { params: Promise<{ projectId: st
     }
   }, [myInvestments, projectId, resumeChecked]);
 
-  if (!user) {
-    router.replace('/login');
-    return null;
-  }
+  useEffect(() => {
+    if (!user) router.replace('/login');
+  }, [user, router]);
+
+  if (!user) return null;
 
   if (isLoading) return (
     <div className="min-h-screen flex flex-col">

@@ -54,9 +54,10 @@ export default function MyInvestmentsPage() {
 
         {viewDoc && (
           <PdfViewer
-            path={`/api/investments/${viewDoc.invId}/${viewDoc.type}`}
+            path={`/api/investments/${viewDoc.invId}/${viewDoc.type}/pdf`}
+            downloadPath={`/api/investments/${viewDoc.invId}/${viewDoc.type}/download`}
             filename={viewDoc.label}
-            isHtml={true}
+            isHtml={false}
             onClose={() => setViewDoc(null)}
           />
         )}
@@ -107,8 +108,8 @@ export default function MyInvestmentsPage() {
 
                   {/* Actions */}
                   <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
-                    {/* Voir le contrat */}
-                    {inv.contratInvestorSignedAt && (
+                    {/* Voir le contrat — disponible uniquement après co-signature (PDF stocké) */}
+                    {inv.contratEmitterSignedAt && (
                       <button
                         onClick={() => setViewDoc({ invId: inv.id, type: 'contrat', label: "Contrat d'émission" })}
                         className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 transition-colors"

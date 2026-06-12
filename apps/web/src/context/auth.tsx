@@ -8,7 +8,7 @@ import { User, AuthResponse } from '@/types';
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   register: (email: string, password: string, profileType: string) => Promise<void>;
   logout: () => void;
 }
@@ -31,11 +31,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  async function login(email: string, password: string) {
+  async function login(email: string, password: string): Promise<User> {
     const res = await api.post<AuthResponse>('/api/auth/login', { email, password });
     Cookies.set('token', res.access_token, { expires: 7 });
     const me = await api.get<User>('/api/users/me');
     setUser(me);
+    return me;
   }
 
   async function register(email: string, password: string, profileType: string) {
